@@ -1,0 +1,889 @@
+openapi: 3.1.0
+info:
+  title: Thai E-Commerce API
+  version: 1.0.0
+  description: |
+    REST API สำหรับเว็บขายสินค้าออนไลน์ (Thai Market)
+    Base URL: https://yourdomain.com/api/v1
+  contact:
+    name: Dev Team
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Local development
+  - url: https://staging.yourdomain.com/api/v1
+    description: Staging
+  - url: https://yourdomain.com/api/v1
+    description: Production
+
+tags:
+  - name: auth
+    description: Authentication (LINE, Google, OTP)
+  - name: products
+    description: Product catalog
+  - name: cart
+    description: Shopping cart
+  - name: orders
+    description: Order management
+  - name: payments
+    description: Payment processing (Omise)
+  - name: users
+    description: User profile & addresses
+  - name: admin
+    description: Admin-only endpoints
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    AdminAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # ── Common ──
+    Error:
+      type: object
+      properties:
+        code:    { type: string, example: "NOT_FOUND" }
+        message: { type: string, example: "ไม่พบสินค้า" }
+      required: [code, message]
+
+    Pagination:
+      type: object
+      properties:
+        page:       { type: integer, example: 1 }
+        limit:      { type: integer, example: 20 }
+        total:      { type: integer, example: 150 }
+        totalPages: { type: integer, example: 8 }
+
+    Money:
+      type: number
+      format: decimal
+      description: Amount in THB
+      example: 299.00
+
+    # ── Auth ──
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:  { type: string }
+        refreshToken: { type: string }
+        expiresIn:    { type: integer, example: 3600 }
+        user:         { $ref: '#/components/schemas/UserProfile' }
+
+    UserProfile:
+      type: object
+      properties:
+        id:          { type: string }
+        name:        { type: string }
+        email:       { type: string, nullable: true }
+        phoneNumber: { type: string, nullable: true }
+        avatarUrl:   { type: string, nullable: true }
+        role:        { type: string, enum: [CUSTOMER, ADMIN] }
+
+    # ── Products ──
+    Product:
+      type: object
+      properties:
+        id:           { type: string }
+        sku:          { type: string }
+        nameTh:       { type: string }
+        slug:         { type: string }
+        price:        { $ref: '#/components/schemas/Money' }
+        comparePrice: { $ref: '#/components/schemas/Money', nullable: true }
+        primaryImage: { type: string, nullable: true }
+        rating:       { type: number, example: 4.5 }
+        reviewCount:  { type: integer }
+        inStock:      { type: boolean }
+        category:
+          type: object
+          properties:
+            id:     { type: string }
+            nameTh: { type: string }
+            slug:   { type: string }
+
+    ProductDetail:
+      allOf:
+        - $ref: '#/components/schemas/Product'
+        - type: object
+          properties:
+            descriptionTh: { type: string }
+            images:
+              type: array
+              items:
+                type: object
+                properties:
+                  url:     { type: string }
+                  altText: { type: string, nullable: true }
+            variants:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:         { type: string }
+                  nameTh:     { type: string }
+                  price:      { $ref: '#/components/schemas/Money', nullable: true }
+                  attributes: { type: object }
+                  inStock:    { type: boolean }
+                  quantity:   { type: integer }
+            tags:     { type: array, items: { type: string } }
+
+    # ── Cart ──
+    CartItem:
+      type: object
+      properties:
+        id:         { type: string }
+        productId:  { type: string }
+        variantId:  { type: string, nullable: true }
+        product:    { $ref: '#/components/schemas/Product' }
+        variantName:{ type: string, nullable: true }
+        quantity:   { type: integer }
+        unitPrice:  { $ref: '#/components/schemas/Money' }
+        total:      { $ref: '#/components/schemas/Money' }
+
+    Cart:
+      type: object
+      properties:
+        id:    { type: string }
+        items: { type: array, items: { $ref: '#/components/schemas/CartItem' } }
+        subtotal:      { $ref: '#/components/schemas/Money' }
+        shippingFee:   { $ref: '#/components/schemas/Money' }
+        discountAmount:{ $ref: '#/components/schemas/Money' }
+        total:         { $ref: '#/components/schemas/Money' }
+        appliedCoupon:
+          type: object
+          nullable: true
+          properties:
+            code:     { type: string }
+            discount: { $ref: '#/components/schemas/Money' }
+
+    # ── Orders ──
+    Order:
+      type: object
+      properties:
+        id:           { type: string }
+        orderNumber:  { type: string, example: "TH-20250101-0001" }
+        status:       { type: string, enum: [PENDING, CONFIRMED, PROCESSING, SHIPPED, DELIVERED, CANCELLED] }
+        paymentStatus:{ type: string, enum: [UNPAID, PENDING, PAID, FAILED, REFUNDED] }
+        items:        { type: array, items: { $ref: '#/components/schemas/OrderItem' } }
+        subtotal:      { $ref: '#/components/schemas/Money' }
+        shippingFee:   { $ref: '#/components/schemas/Money' }
+        discountAmount:{ $ref: '#/components/schemas/Money' }
+        total:         { $ref: '#/components/schemas/Money' }
+        shippingAddress: { $ref: '#/components/schemas/AddressSnapshot' }
+        trackingNumber: { type: string, nullable: true }
+        createdAt:    { type: string, format: date-time }
+
+    OrderItem:
+      type: object
+      properties:
+        id:          { type: string }
+        productName: { type: string }
+        variantName: { type: string, nullable: true }
+        sku:         { type: string }
+        quantity:    { type: integer }
+        unitPrice:   { $ref: '#/components/schemas/Money' }
+        total:       { $ref: '#/components/schemas/Money' }
+        imageUrl:    { type: string, nullable: true }
+
+    AddressSnapshot:
+      type: object
+      properties:
+        recipientName: { type: string }
+        phoneNumber:   { type: string }
+        addressLine1:  { type: string }
+        subDistrict:   { type: string }
+        district:      { type: string }
+        province:      { type: string }
+        postalCode:    { type: string }
+
+    # ── Payment ──
+    PaymentResponse:
+      type: object
+      properties:
+        paymentId:   { type: string }
+        method:      { type: string }
+        status:      { type: string }
+        qrCodeUrl:   { type: string, nullable: true, description: "URL สำหรับ PromptPay QR" }
+        redirectUrl: { type: string, nullable: true, description: "URL สำหรับ redirect บัตรเครดิต" }
+
+paths:
+  # ─────────────────────────────────────────────
+  # AUTH
+  # ─────────────────────────────────────────────
+
+  /auth/line:
+    post:
+      tags: [auth]
+      summary: Login ด้วย LINE
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:        { type: string, description: "LINE auth code" }
+                redirectUri: { type: string }
+              required: [code, redirectUri]
+      responses:
+        '200': { description: Success, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+        '401': { description: Invalid code, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /auth/google:
+    post:
+      tags: [auth]
+      summary: Login ด้วย Google
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idToken: { type: string, description: "Google ID token" }
+              required: [idToken]
+      responses:
+        '200': { description: Success, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+
+  /auth/otp/request:
+    post:
+      tags: [auth]
+      summary: ขอ OTP ทาง SMS
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phoneNumber: { type: string, example: "0812345678" }
+              required: [phoneNumber]
+      responses:
+        '200':
+          description: OTP sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:   { type: string }
+                  expiresIn: { type: integer, example: 300 }
+        '429': { description: Rate limit exceeded }
+
+  /auth/otp/verify:
+    post:
+      tags: [auth]
+      summary: ยืนยัน OTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phoneNumber: { type: string }
+                code:        { type: string, example: "123456" }
+              required: [phoneNumber, code]
+      responses:
+        '200': { description: Success, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+        '400': { description: Invalid/expired OTP }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken: { type: string }
+              required: [refreshToken]
+      responses:
+        '200': { description: New tokens, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Logout
+      security: [{ BearerAuth: [] }]
+      responses:
+        '204': { description: Logged out }
+
+  # ─────────────────────────────────────────────
+  # PRODUCTS
+  # ─────────────────────────────────────────────
+
+  /products:
+    get:
+      tags: [products]
+      summary: ค้นหาและแสดงรายการสินค้า
+      parameters:
+        - name: q
+          in: query
+          description: คำค้นหา (ภาษาไทย/อังกฤษ)
+          schema: { type: string }
+        - name: categorySlug
+          in: query
+          schema: { type: string }
+        - name: brandId
+          in: query
+          schema: { type: string }
+        - name: minPrice
+          in: query
+          schema: { type: number }
+        - name: maxPrice
+          in: query
+          schema: { type: number }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [newest, price_asc, price_desc, popular, rating]
+            default: newest
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+        - name: inStock
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: รายการสินค้า
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:       { type: array, items: { $ref: '#/components/schemas/Product' } }
+                  pagination: { $ref: '#/components/schemas/Pagination' }
+
+  /products/{slug}:
+    get:
+      tags: [products]
+      summary: รายละเอียดสินค้า
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: สินค้า, content: { application/json: { schema: { $ref: '#/components/schemas/ProductDetail' } } } }
+        '404': { description: ไม่พบสินค้า, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /products/featured:
+    get:
+      tags: [products]
+      summary: สินค้าแนะนำ
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 8 }
+      responses:
+        '200':
+          description: สินค้าแนะนำ
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Product' } }
+
+  /categories:
+    get:
+      tags: [products]
+      summary: รายการหมวดหมู่
+      responses:
+        '200':
+          description: หมวดหมู่ทั้งหมด
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:       { type: string }
+                        nameTh:   { type: string }
+                        slug:     { type: string }
+                        imageUrl: { type: string, nullable: true }
+                        children: { type: array, items: { type: object } }
+
+  # ─────────────────────────────────────────────
+  # CART
+  # ─────────────────────────────────────────────
+
+  /cart:
+    get:
+      tags: [cart]
+      summary: ดูตะกร้า
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200': { description: ตะกร้า, content: { application/json: { schema: { $ref: '#/components/schemas/Cart' } } } }
+
+  /cart/items:
+    post:
+      tags: [cart]
+      summary: เพิ่มสินค้าในตะกร้า
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                productId: { type: string }
+                variantId: { type: string, nullable: true }
+                quantity:  { type: integer, minimum: 1, default: 1 }
+              required: [productId]
+      responses:
+        '200': { description: ตะกร้าอัปเดต, content: { application/json: { schema: { $ref: '#/components/schemas/Cart' } } } }
+        '400': { description: สต็อกไม่เพียงพอ }
+        '404': { description: ไม่พบสินค้า }
+
+  /cart/items/{itemId}:
+    patch:
+      tags: [cart]
+      summary: อัปเดตจำนวนสินค้า
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                quantity: { type: integer, minimum: 1 }
+              required: [quantity]
+      responses:
+        '200': { description: อัปเดตสำเร็จ, content: { application/json: { schema: { $ref: '#/components/schemas/Cart' } } } }
+    delete:
+      tags: [cart]
+      summary: ลบสินค้าออกจากตะกร้า
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: ลบสำเร็จ, content: { application/json: { schema: { $ref: '#/components/schemas/Cart' } } } }
+
+  /cart/coupon:
+    post:
+      tags: [cart]
+      summary: ใช้คูปอง
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: { type: string }
+              required: [code]
+      responses:
+        '200': { description: ตะกร้าพร้อมส่วนลด, content: { application/json: { schema: { $ref: '#/components/schemas/Cart' } } } }
+        '400': { description: คูปองไม่ถูกต้องหรือหมดอายุ }
+    delete:
+      tags: [cart]
+      summary: ยกเลิกคูปอง
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200': { description: ยกเลิกคูปองสำเร็จ }
+
+  # ─────────────────────────────────────────────
+  # ORDERS
+  # ─────────────────────────────────────────────
+
+  /orders:
+    get:
+      tags: [orders]
+      summary: ประวัติคำสั่งซื้อ
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [PENDING, CONFIRMED, PROCESSING, SHIPPED, DELIVERED, CANCELLED] }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+      responses:
+        '200':
+          description: รายการคำสั่งซื้อ
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:       { type: array, items: { $ref: '#/components/schemas/Order' } }
+                  pagination: { $ref: '#/components/schemas/Pagination' }
+    post:
+      tags: [orders]
+      summary: สร้างคำสั่งซื้อ (Checkout)
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                addressId:     { type: string }
+                shippingMethod:{ type: string }
+                paymentMethod:
+                  type: string
+                  enum: [CREDIT_CARD, PROMPTPAY_QR, CASH_ON_DELIVERY]
+                note:          { type: string }
+              required: [addressId, paymentMethod]
+      responses:
+        '201':
+          description: สร้างคำสั่งซื้อสำเร็จ
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order:   { $ref: '#/components/schemas/Order' }
+                  payment: { $ref: '#/components/schemas/PaymentResponse' }
+        '400': { description: ข้อมูลไม่ถูกต้อง }
+        '409': { description: สต็อกไม่เพียงพอ }
+
+  /orders/{orderId}:
+    get:
+      tags: [orders]
+      summary: รายละเอียดคำสั่งซื้อ
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: คำสั่งซื้อ, content: { application/json: { schema: { $ref: '#/components/schemas/Order' } } } }
+        '404': { description: ไม่พบคำสั่งซื้อ }
+
+  /orders/{orderId}/cancel:
+    post:
+      tags: [orders]
+      summary: ยกเลิกคำสั่งซื้อ
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200': { description: ยกเลิกสำเร็จ }
+        '400': { description: ไม่สามารถยกเลิกได้ (จัดส่งแล้ว) }
+
+  # ─────────────────────────────────────────────
+  # PAYMENTS
+  # ─────────────────────────────────────────────
+
+  /payments/webhook/omise:
+    post:
+      tags: [payments]
+      summary: Webhook จาก Omise
+      description: รับ event จาก Omise gateway (charge.complete, charge.failed ฯลฯ)
+      responses:
+        '200': { description: Processed }
+
+  /payments/{paymentId}/status:
+    get:
+      tags: [payments]
+      summary: เช็คสถานะการชำระเงิน
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: paymentId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: สถานะ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentResponse' }
+
+  # ─────────────────────────────────────────────
+  # USER PROFILE
+  # ─────────────────────────────────────────────
+
+  /users/me:
+    get:
+      tags: [users]
+      summary: โปรไฟล์ตัวเอง
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200': { description: โปรไฟล์, content: { application/json: { schema: { $ref: '#/components/schemas/UserProfile' } } } }
+    patch:
+      tags: [users]
+      summary: แก้ไขโปรไฟล์
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:     { type: string }
+                avatarUrl:{ type: string }
+      responses:
+        '200': { description: อัปเดตสำเร็จ, content: { application/json: { schema: { $ref: '#/components/schemas/UserProfile' } } } }
+
+  /users/me/addresses:
+    get:
+      tags: [users]
+      summary: รายการที่อยู่
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: ที่อยู่ทั้งหมด
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { type: object } }
+    post:
+      tags: [users]
+      summary: เพิ่มที่อยู่
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:         { type: string }
+                recipientName: { type: string }
+                phoneNumber:   { type: string }
+                addressLine1:  { type: string }
+                subDistrict:   { type: string }
+                district:      { type: string }
+                province:      { type: string }
+                postalCode:    { type: string }
+                isDefault:     { type: boolean }
+              required: [recipientName, phoneNumber, addressLine1, subDistrict, district, province, postalCode]
+      responses:
+        '201': { description: เพิ่มที่อยู่สำเร็จ }
+
+  # ─────────────────────────────────────────────
+  # ADMIN
+  # ─────────────────────────────────────────────
+
+  /admin/products:
+    get:
+      tags: [admin]
+      summary: "[Admin] รายการสินค้า"
+      security: [{ AdminAuth: [] }]
+      parameters:
+        - name: page  
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: search
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: รายการสินค้า }
+    post:
+      tags: [admin]
+      summary: "[Admin] สร้างสินค้า"
+      security: [{ AdminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sku:          { type: string }
+                nameTh:       { type: string }
+                price:        { $ref: '#/components/schemas/Money' }
+                categoryId:   { type: string }
+                descriptionTh:{ type: string }
+              required: [sku, nameTh, price]
+      responses:
+        '201': { description: สร้างสำเร็จ }
+
+  /admin/products/{productId}:
+    put:
+      tags: [admin]
+      summary: "[Admin] แก้ไขสินค้า"
+      security: [{ AdminAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: แก้ไขสำเร็จ }
+    delete:
+      tags: [admin]
+      summary: "[Admin] ลบ/ซ่อนสินค้า"
+      security: [{ AdminAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: ลบสำเร็จ }
+
+  /admin/products/{productId}/inventory:
+    patch:
+      tags: [admin]
+      summary: "[Admin] อัปเดตสต็อก"
+      security: [{ AdminAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                quantity: { type: integer }
+                reason:   { type: string }
+                note:     { type: string }
+              required: [quantity]
+      responses:
+        '200': { description: อัปเดตสต็อกสำเร็จ }
+
+  /admin/orders:
+    get:
+      tags: [admin]
+      summary: "[Admin] รายการคำสั่งซื้อ"
+      security: [{ AdminAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+        - name: search
+          in: query
+          description: ค้นหาด้วย order number หรือชื่อลูกค้า
+          schema: { type: string }
+      responses:
+        '200': { description: รายการคำสั่งซื้อ }
+
+  /admin/orders/{orderId}/status:
+    patch:
+      tags: [admin]
+      summary: "[Admin] อัปเดตสถานะคำสั่งซื้อ"
+      security: [{ AdminAuth: [] }]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:         { type: string, enum: [CONFIRMED, PROCESSING, SHIPPED, DELIVERED, CANCELLED] }
+                trackingNumber: { type: string }
+                note:           { type: string }
+              required: [status]
+      responses:
+        '200': { description: อัปเดตสำเร็จ }
+
+  /admin/orders/{orderId}/refund:
+    post:
+      tags: [admin]
+      summary: "[Admin] คืนเงิน"
+      security: [{ AdminAuth: [] }]
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount: { $ref: '#/components/schemas/Money' }
+                reason: { type: string }
+              required: [amount, reason]
+      responses:
+        '200': { description: คืนเงินสำเร็จ }
+
+  /admin/reports/sales:
+    get:
+      tags: [admin]
+      summary: "[Admin] รายงานยอดขาย"
+      security: [{ AdminAuth: [] }]
+      parameters:
+        - name: period
+          in: query
+          schema: { type: string, enum: [today, week, month, year, custom] }
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+        - name: format
+          in: query
+          schema: { type: string, enum: [json, csv] }
+      responses:
+        '200':
+          description: รายงาน
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalRevenue:  { $ref: '#/components/schemas/Money' }
+                  totalOrders:   { type: integer }
+                  avgOrderValue: { $ref: '#/components/schemas/Money' }
+                  topProducts:   { type: array, items: { type: object } }
+                  dailyRevenue:  { type: array, items: { type: object } }
